@@ -8,7 +8,7 @@ __pycache__/
 .venv/
 venv/
 env/
-
+manual_test.py
 # Jupyter
 .ipynb_checkpoints/
 

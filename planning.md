@@ -24,6 +24,7 @@ This tool will look in the listings.json and returns the top 3 matching listings
 - `max_price` (float): This is the upper limit of price the user is willing to pay for an item.
 
 **Relevance ranking priority:**
+0. Description match (hard filter — check if the description keyword appears in the item's title, description, category, or style_tags. If no items match, return empty results immediately. Do not fall back to loose category matches.)
 1. Exact `size` match (hard filter — exclude non-matches)
 2. Exact `category` match
 3. Color similarity to `description`
@@ -31,8 +32,10 @@ This tool will look in the listings.json and returns the top 3 matching listings
 
 **What it returns:**
 <!-- Describe the return value — what fields does a result contain? -->
-This tool should return a list of 3 dictionaries that contains the closest matching items to the user's description. Each of the dictionaries will be directly taken from `listings.json` where a dictionary will be in the form of 
-`{
+This tool should return a list of up to 3 dictionaries that contains the closest 
+matching items to the user's description. Each of the dictionaries will be directly 
+taken from `listings.json` where a dictionary will be in the form of:
+{
     "id": string,
     "title": string,
     "description": string,
@@ -40,19 +43,18 @@ This tool should return a list of 3 dictionaries that contains the closest match
     "style_tags": [string],
     "size": string,
     "condition": string,
-    "price": float,        
+    "price": float,
     "colors": [string],
     "brand": string,
     "platform": string
-  }
-`
+}
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if no listings match? -->
-If 0 matches are found, return: 
-{ "results": [], "message": "No listings matched the given size/category/price." }
-FitFindr should then tell the user what to try differently (e.g. adjusting size, 
-price range, or description) and stop — do not call `suggest_outfit` with empty input.
-Otherwise return the top 3 results wrapped as: { "results": [...] }
+If no items pass the description match filter, return:
+{ "results": [], "message": "No listings matched '[description]'. Try a broader description, different size, or higher price range." }
+Do not return loosely related items without telling the user — do not call `suggest_outfit` with empty input.
+
+If results are found, return the top 3 wrapped as: { "results": [...] }
 ---
 
 ### Tool 2: suggest_outfit

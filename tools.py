@@ -52,12 +52,66 @@ _COLORS = {
     "indigo", "teal", "maroon", "gold", "silver", "ivory", "khaki",
 }
 
+_STOP_WORDS = {
+    "a", "an", "the", "and", "or", "but", "for", "with", "in", "on",
+    "at", "to", "of", "by", "from", "is", "are", "was", "has", "have",
+    "had", "not", "this", "that", "my", "me", "i", "it", "its",
+}
+
+
+_SIZE_ALIASES: dict[str, str] = {
+    "extra small": "xs",
+    "small":       "s",
+    "medium":      "m",
+    "large":       "l",
+    "extra large": "xl",
+}
+
+
+def _size_parts(listing_size: str) -> set[str]:
+    """Split a listing size into normalized parts, stripping parenthetical notes.
+
+    "XL (fits oversized)" → {"xl"}
+    "S/M"                 → {"s", "m"}
+    "One Size / Oversized"→ {"one size", "oversized"}
+    """
+    parts = set()
+    for part in listing_size.split("/"):
+        clean = part.split("(")[0].strip().lower()
+        if clean:
+            parts.add(clean)
+    return parts
+
+
+def _size_matches(listing_size: str, requested_size: str) -> bool:
+    """Return True if requested_size matches any part of a listing's size field.
+
+    Handles multi-size strings ("S/M", "M/L", "L/XL"), parenthetical notes
+    ("XL (fits oversized)"), and full-word aliases ("medium" → "m").
+    """
+    normalized = _SIZE_ALIASES.get(requested_size.strip().lower(), requested_size.strip().lower())
+    return normalized in _size_parts(listing_size)
+
+
+def _matches_description(listing: dict, desc_words: set[str]) -> bool:
+    """Return True if any meaningful description word appears in the listing's text."""
+    meaningful = {w for w in desc_words if len(w) >= 3 and w not in _STOP_WORDS}
+    if not meaningful:
+        return True  # no meaningful words to filter on — don't exclude
+    listing_text = " ".join([
+        listing.get("title", ""),
+        listing.get("description", ""),
+        listing.get("category", ""),
+        " ".join(listing.get("style_tags", [])),
+    ]).lower()
+    return any(word in listing_text for word in meaningful)
+
 
 def search_listings(
     description: str,
     size: str | None = None,
     max_price: float | None = None,
-) -> list[dict]:
+) -> dict:
     """
     Search the mock listings dataset for items matching the description,
     optional size, and optional price ceiling.
@@ -69,15 +123,15 @@ def search_listings(
         max_price:   Upper price limit (inclusive), or None to skip price filtering.
 
     Returns:
-        A list of up to 3 matching listing dicts sorted by relevance.
-        Returns [] if nothing matches — does not raise.
+        {"results": [<up to 3 listing dicts>]}  on success
+        {"results": [], "message": "..."}        when nothing matches
     """
     listings = load_listings()
 
     desc_lower = description.lower()
     desc_words = set(desc_lower.split())
 
-    # Infer category from description keywords
+    # Infer category from description keywords (used for scoring only)
     inferred_category: str | None = None
     for category, keywords in _CATEGORY_KEYWORDS.items():
         if keywords & desc_words:
@@ -88,8 +142,11 @@ def search_listings(
 
     candidates: list[tuple[int, dict]] = []
     for listing in listings:
-        # Hard filters (only applied when the argument is provided)
-        if size is not None and listing["size"].lower() != size.lower():
+        # Hard filter: at least one description keyword must appear in the listing
+        if not _matches_description(listing, desc_words):
+            continue
+        # Hard filters: size and price (only when provided)
+        if size is not None and not _size_matches(listing["size"], size):
             continue
         if max_price is not None and listing["price"] > max_price:
             continue
@@ -104,8 +161,17 @@ def search_listings(
 
         candidates.append((score, listing))
 
+    if not candidates:
+        return {
+            "results": [],
+            "message": (
+                f"No listings matched '{description}'. "
+                "Try a broader description, different size, or higher price range."
+            ),
+        }
+
     candidates.sort(key=lambda x: x[0], reverse=True)
-    return [listing for _, listing in candidates[:3]]
+    return {"results": [listing for _, listing in candidates[:3]]}
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
