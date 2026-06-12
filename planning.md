@@ -209,12 +209,12 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 | Tool | Failure mode | Agent response |
 |------|-------------|----------------|
-| search_listings | No results match the query | Tell the user to try adjusting their description, size, or price range. Stop — do not call `suggest_outfit`. |
-| search_listings | Returns empty when searching for missing wardrobe pieces | Tell the user no matching pieces were found and a full outfit couldn't be built. Stop. |
+| search_listings | No results match the query | "I couldn't find any listings matching that description under $30 in size M. Try broadening your search — for example, a higher price range, a different size, or a simpler description like 'graphic tee' instead of 'vintage graphic tee'." Stop — do not call suggest_outfit. |
+| search_listings | Returns empty when searching for missing wardrobe pieces | "I couldn't find any [category] listings to complete the outfit. You can try adjusting the size or price range, or skip that category and style the outfit without it." |
 | suggest_outfit | Wardrobe is empty | Ask the user if they'd like to search listings for missing pieces. If no, stop and let the user know a full outfit couldn't be built. |
 | suggest_outfit | Wardrobe exists but missing key categories | Ask the user if they'd like to search listings for the missing categories (top, bottom, or shoes). |
-| create_fit_card | Outfit input is missing or incomplete | Tell the user the outfit is incomplete and skip generating a caption. |
-| create_fit_card | `new_item` is missing key fields | Generate the caption using whatever fields are available, omitting missing details. |
+| create_fit_card | Outfit input is missing or incomplete | "I don't have enough pieces to write a full fit card yet — the outfit is missing [category]. Head back and complete the outfit first, or I can write a partial caption around just the [new_item]." |
+| create_fit_card | `new_item` is missing key fields | Generate the caption using whatever fields are available. If price is missing, omit the price reference. If platform is missing, omit where it was found. If description is missing, lean on style_tags and colors instead. |
 
 ---
 
