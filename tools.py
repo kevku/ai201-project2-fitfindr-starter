@@ -12,6 +12,7 @@ Tools:
     create_fit_card(outfit, new_item)               → str
 """
 
+import json
 import os
 
 from dotenv import load_dotenv
@@ -36,6 +37,22 @@ def _get_groq_client():
 
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
 
+_CATEGORY_KEYWORDS: dict[str, set[str]] = {
+    "tops":       {"shirt", "tee", "top", "blouse", "sweater", "hoodie", "crop", "tank", "polo", "henley", "button"},
+    "bottoms":    {"jeans", "pants", "shorts", "skirt", "trousers", "denim", "leggings", "chinos", "slacks"},
+    "outerwear":  {"jacket", "coat", "blazer", "vest", "windbreaker", "parka", "bomber", "trench"},
+    "shoes":      {"sneakers", "boots", "heels", "shoes", "loafers", "sandals", "trainers", "flats", "oxfords"},
+    "accessories":{"hat", "bag", "belt", "scarf", "sunglasses", "glasses", "jewelry", "necklace", "ring",
+                   "bracelet", "watch", "purse", "backpack", "cap", "beanie"},
+}
+
+_COLORS = {
+    "black", "white", "red", "blue", "green", "yellow", "orange", "purple",
+    "pink", "brown", "grey", "gray", "navy", "beige", "cream", "tan",
+    "indigo", "teal", "maroon", "gold", "silver", "ivory", "khaki",
+}
+
+
 def search_listings(
     description: str,
     size: str | None = None,
@@ -46,92 +63,278 @@ def search_listings(
     optional size, and optional price ceiling.
 
     Args:
-        description: Keywords describing what the user is looking for
-                     (e.g., "vintage graphic tee").
-        size:        Size string to filter by, or None to skip size filtering.
-                     Matching is case-insensitive (e.g., "M" matches "S/M").
-        max_price:   Maximum price (inclusive), or None to skip price filtering.
+        description: Free-text description of the item (category, color, style).
+        size:        Size string for exact case-insensitive match, or None to
+                     skip size filtering (e.g. "M", "W30 L30", "US 9.5").
+        max_price:   Upper price limit (inclusive), or None to skip price filtering.
 
     Returns:
-        A list of matching listing dicts, sorted by relevance (best match first).
-        Returns an empty list if nothing matches — does NOT raise an exception.
-
-    Each listing dict has the following fields:
-        id, title, description, category, style_tags (list), size,
-        condition, price (float), colors (list), brand, platform
-
-    TODO:
-        1. Load all listings with load_listings().
-        2. Filter by max_price and size (if provided).
-        3. Score each remaining listing by keyword overlap with `description`.
-        4. Drop any listings with a score of 0 (no relevant matches).
-        5. Sort by score, highest first, and return the listing dicts.
-
-    Before writing code, fill in the Tool 1 section of planning.md.
+        A list of up to 3 matching listing dicts sorted by relevance.
+        Returns [] if nothing matches — does not raise.
     """
-    # Replace this with your implementation
-    return []
+    listings = load_listings()
+
+    desc_lower = description.lower()
+    desc_words = set(desc_lower.split())
+
+    # Infer category from description keywords
+    inferred_category: str | None = None
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        if keywords & desc_words:
+            inferred_category = category
+            break
+
+    desc_colors = _COLORS & desc_words
+
+    candidates: list[tuple[int, dict]] = []
+    for listing in listings:
+        # Hard filters (only applied when the argument is provided)
+        if size is not None and listing["size"].lower() != size.lower():
+            continue
+        if max_price is not None and listing["price"] > max_price:
+            continue
+
+        score = 0
+        if inferred_category and listing["category"] == inferred_category:
+            score += 2
+        listing_colors = {c.lower() for c in listing.get("colors", [])}
+        score += len(desc_colors & listing_colors)
+        listing_tags = {t.lower() for t in listing.get("style_tags", [])}
+        score += len(listing_tags & desc_words)
+
+        candidates.append((score, listing))
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return [listing for _, listing in candidates[:3]]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
 
-def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
+_REQUIRED_CATEGORIES = {"tops", "bottoms", "shoes"}
+
+_OUTFIT_PROMPT = """\
+You are a fashion stylist helping someone style a new thrifted item.
+
+New item being considered:
+- Title: {title}
+- Category: {category}
+- Colors: {colors}
+- Style tags: {tags}
+- Description: {description}
+
+User's wardrobe:
+{wardrobe_lines}
+
+Task: Suggest 1–2 complete outfits pairing the new item with pieces from the wardrobe above.
+Rules:
+- Each outfit must include at least one top, one bottom, and shoes (if available)
+- Prioritize pieces with matching or complementary colors and overlapping style tags
+- Outerwear and accessories are optional additions
+- Only reference items from the wardrobe list by their exact ID
+
+Return ONLY valid JSON — no markdown, no explanation. Format:
+[
+  {{
+    "outfit_id": 1,
+    "piece_ids": ["id1", "id2"],
+    "notes": "One or two sentences on why these pieces work together."
+  }}
+]"""
+
+
+def suggest_outfit(new_item: dict, wardrobe: dict) -> dict:
     """
     Given a thrifted item and the user's wardrobe, suggest 1–2 complete outfits.
 
     Args:
         new_item: A listing dict (the item the user is considering buying).
         wardrobe: A wardrobe dict with an 'items' key containing a list of
-                  wardrobe item dicts. May be empty — handle this gracefully.
+                  wardrobe item dicts. May be empty.
 
     Returns:
-        A non-empty string with outfit suggestions.
-        If the wardrobe is empty, offer general styling advice for the item
-        rather than raising an exception or returning an empty string.
-
-    TODO:
-        1. Check whether wardrobe['items'] is empty.
-        2. If empty: call the LLM with a prompt for general styling ideas
-           (what kinds of items pair well, what vibe it suits, etc.).
-        3. If not empty: format the wardrobe items into a prompt and ask
-           the LLM to suggest specific outfit combinations using the new item
-           and named pieces from the wardrobe.
-        4. Return the LLM's response as a string.
-
-    Before writing code, fill in the Tool 2 section of planning.md.
+        {"results": [{"outfit_id": int, "pieces": [dict], "notes": str}, ...]}
+        {"results": [...], "message": str}  when outfit is incomplete
+        {"results": [], "message": str}     when wardrobe is empty
+        {"duplicate": True, "message": str} when new_item already in wardrobe
     """
-    # Replace this with your implementation
-    return ""
+    items = wardrobe.get("items", [])
+
+    if not items:
+        return {
+            "results": [],
+            "message": (
+                "Your wardrobe is empty. Would you like me to search listings "
+                "to build a full outfit?"
+            ),
+        }
+
+    # Duplicate check — can't style something the user already owns the same way
+    wardrobe_ids = {item["id"] for item in items}
+    if new_item.get("id") in wardrobe_ids:
+        return {
+            "duplicate": True,
+            "message": (
+                "It looks like you already own this item! Would you like me to:\n"
+                "1. Style it using pieces you already own\n"
+                "2. Find new pieces from listings that pair well with it"
+            ),
+        }
+
+    # Determine which required categories are missing from the wardrobe
+    # (new_item covers its own category)
+    new_category = new_item.get("category", "")
+    covered = {item["category"] for item in items} | {new_category}
+    missing_categories = _REQUIRED_CATEGORIES - covered
+
+    # Build a scored, human-readable wardrobe list for the prompt
+    new_colors = {c.lower() for c in new_item.get("colors", [])}
+    new_tags   = {t.lower() for t in new_item.get("style_tags", [])}
+
+    def _score(item: dict) -> int:
+        color_overlap = len(new_colors & {c.lower() for c in item.get("colors", [])})
+        tag_overlap   = len(new_tags   & {t.lower() for t in item.get("style_tags", [])})
+        return color_overlap * 2 + tag_overlap
+
+    sorted_items = sorted(items, key=_score, reverse=True)
+    wardrobe_lines = "\n".join(
+        f"  - ID: {it['id']} | {it['name']} | category: {it['category']} "
+        f"| colors: {', '.join(it.get('colors', []))} "
+        f"| tags: {', '.join(it.get('style_tags', []))}"
+        for it in sorted_items
+    )
+
+    prompt = _OUTFIT_PROMPT.format(
+        title=new_item.get("title", new_item.get("name", "Unknown")),
+        category=new_category,
+        colors=", ".join(new_item.get("colors", [])),
+        tags=", ".join(new_item.get("style_tags", [])),
+        description=new_item.get("description", ""),
+        wardrobe_lines=wardrobe_lines,
+    )
+
+    client = _get_groq_client()
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+    )
+    raw = response.choices[0].message.content.strip()
+
+    # Strip markdown code fences if the model included them
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1].lstrip("json").strip() if len(parts) > 1 else raw
+
+    try:
+        outfit_list = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"results": [], "message": f"Could not parse outfit suggestions from LLM: {raw}"}
+
+    # Resolve piece IDs to actual wardrobe item dicts
+    id_to_item = {item["id"]: item for item in items}
+    results = []
+    for outfit in outfit_list:
+        pieces = [id_to_item[pid] for pid in outfit.get("piece_ids", []) if pid in id_to_item]
+        results.append({
+            "outfit_id": outfit.get("outfit_id", len(results) + 1),
+            "pieces": pieces,
+            "notes": outfit.get("notes", ""),
+        })
+
+    if missing_categories:
+        missing_str = " and ".join(sorted(missing_categories))
+        return {
+            "results": results,
+            "message": f"No {missing_str} found in wardrobe to complete this outfit.",
+        }
+
+    return {"results": results}
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
 
-def create_fit_card(outfit: str, new_item: dict) -> str:
+_FIT_CARD_PROMPT = """\
+You write short, casual Instagram captions for thrift-store outfit posts.
+
+The star of the outfit is a thrifted item:
+- Title: {title}
+- Price: {price}
+- Platform: {platform}
+- Colors: {colors}
+- Style: {tags}
+- Description: {description}
+
+The full outfit also includes:
+{pieces_lines}
+
+Outfit vibe (from the stylist): {notes}
+
+Write ONE caption for this OOTD post. Rules:
+- Casual, first-person, like a real person posting — not a product description
+- Mention the item name (or a natural shorthand), price, and platform once each
+- Capture the specific vibe of this outfit in concrete terms
+- 2–4 sentences max, no hashtags
+- Vary your phrasing — do not start with "just" or "found"
+"""
+
+_INCOMPLETE_OUTFIT_MSG = (
+    "Outfit is incomplete — missing at least one of: top, bottom, or shoes. "
+    "Caption generation skipped."
+)
+
+
+def create_fit_card(outfit: dict, new_item: dict) -> str:
     """
-    Generate a short, shareable outfit caption for the thrifted find.
+    Generate a short, shareable Instagram-style caption for a completed outfit.
 
     Args:
-        outfit:   The outfit suggestion string from suggest_outfit().
-        new_item: The listing dict for the thrifted item.
+        outfit:   A single outfit dict from suggest_outfit() with 'pieces' and 'notes'.
+        new_item: The listing dict for the thrifted item the outfit is built around.
 
     Returns:
-        A 2–4 sentence string usable as an Instagram/TikTok caption.
-        If outfit is empty or missing, return a descriptive error message
-        string — do NOT raise an exception.
-
-    The caption should:
-    - Feel casual and authentic (like a real OOTD post, not a product description)
-    - Mention the item name, price, and platform naturally (once each)
-    - Capture the outfit vibe in specific terms
-    - Sound different each time for different inputs (use higher LLM temperature)
-
-    TODO:
-        1. Guard against an empty or whitespace-only outfit string.
-        2. Build a prompt that gives the LLM the item details and the outfit,
-           and asks for a caption matching the style guidelines above.
-        3. Call the LLM and return the response.
-
-    Before writing code, fill in the Tool 3 section of planning.md.
+        A casual 2–4 sentence caption string.
+        An error message string if outfit is incomplete — does NOT raise.
     """
-    # Replace this with your implementation
-    return ""
+    pieces = outfit.get("pieces", [])
+
+    # Guard: outfit must cover the three required categories
+    piece_categories = {p.get("category", "") for p in pieces}
+    # new_item fills its own category
+    piece_categories.add(new_item.get("category", ""))
+    missing = _REQUIRED_CATEGORIES - piece_categories
+    if missing:
+        return _INCOMPLETE_OUTFIT_MSG
+
+    # Format the supporting pieces (everything except new_item)
+    new_item_id = new_item.get("id", "")
+    supporting = [p for p in pieces if p.get("id") != new_item_id]
+    if supporting:
+        pieces_lines = "\n".join(
+            f"  - {p.get('name', p.get('title', 'Unknown'))} "
+            f"({p.get('category', '')}, {', '.join(p.get('colors', []))})"
+            for p in supporting
+        )
+    else:
+        pieces_lines = "  (no additional pieces listed)"
+
+    price = new_item.get("price")
+    price_str = f"${price:.0f}" if price is not None else "unknown price"
+
+    prompt = _FIT_CARD_PROMPT.format(
+        title=new_item.get("title", new_item.get("name", "Unknown item")),
+        price=price_str,
+        platform=new_item.get("platform", "an online thrift store"),
+        colors=", ".join(new_item.get("colors", [])) or "unknown",
+        tags=", ".join(new_item.get("style_tags", [])) or "unknown",
+        description=new_item.get("description", ""),
+        pieces_lines=pieces_lines,
+        notes=outfit.get("notes", ""),
+    )
+
+    client = _get_groq_client()
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=1.1,
+    )
+    return response.choices[0].message.content.strip()
