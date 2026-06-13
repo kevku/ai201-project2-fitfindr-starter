@@ -166,7 +166,7 @@ def search_listings(
             "results": [],
             "message": (
                 f"No listings matched '{description}'. "
-                "Try a broader description, different size, or higher price range."
+                "Item is not found or try a broader description, different size, or higher price range."
             ),
         }
 

@@ -18,6 +18,8 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
+import re
+
 from tools import search_listings, suggest_outfit, create_fit_card
 
 
@@ -92,9 +94,74 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
+    # Step 1: Initialize session
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 2: Parse query → description, size, max_price
+    price_match = re.search(
+        r'(?:under|below|less than|max|up to|at most)\s*\$?(\d+(?:\.\d+)?)',
+        query, re.IGNORECASE,
+    )
+    if not price_match:
+        price_match = re.search(r'\$(\d+(?:\.\d+)?)', query)
+    max_price = float(price_match.group(1)) if price_match else None
+
+    # "size M" takes priority; bare uppercase abbreviation is the fallback
+    size_match = re.search(r'\bsize\s+(\S+)', query, re.IGNORECASE)
+    if not size_match:
+        size_match = re.search(r'\b(XXS|XXL|XS|XL|[SML])\b', query)
+    size = size_match.group(1).upper() if size_match else None
+
+    desc = query
+    desc = re.sub(r'\b(?:looking for|i\'?m looking for|find me|i want|i need)\b', '', desc, flags=re.IGNORECASE)
+    desc = re.sub(r'(?:under|below|less than|max|up to|at most)\s*\$?\d+(?:\.\d+)?', '', desc, flags=re.IGNORECASE)
+    desc = re.sub(r'\$\d+(?:\.\d+)?', '', desc)
+    desc = re.sub(r',?\s*\bsize\s+\S+', '', desc, flags=re.IGNORECASE)
+    desc = re.sub(r',?\s*\b(?:XXS|XXL|XS|XL|[SML])\b\s*', ' ', desc)
+    desc = ' '.join(desc.split()).strip(' ,')
+
+    session["parsed"] = {"description": desc, "size": size, "max_price": max_price}
+
+    # Step 3: Search listings; stop early if nothing matched
+    search_response = search_listings(description=desc, size=size, max_price=max_price)
+    session["search_results"] = search_response.get("results", [])
+
+    if not session["search_results"]:
+        session["error"] = search_response.get(
+            "message",
+            f"No listings found for '{query}'. Try a different description, size, or price range.",
+        )
+        print(f"[DEBUG] no-results path — error: {session['error']!r}")
+        print(f"[DEBUG] no-results path — fit_card: {session['fit_card']!r}")
+        return session
+
+    # Step 4: Select top result as the item to build the outfit around
+    session["selected_item"] = session["search_results"][0]
+    session["new_item"] = session["selected_item"]
+    print(f"[DEBUG] selected_item: {session['selected_item'].get('title')!r}  "
+          f"price=${session['selected_item'].get('price')}  "
+          f"size={session['selected_item'].get('size')!r}")
+
+    # Step 5: Suggest an outfit using the wardrobe
+    outfit_response = suggest_outfit(new_item=session["selected_item"], wardrobe=wardrobe)
+    session["outfit_suggestion"] = outfit_response
+    print(f"[DEBUG] outfit_suggestion: results={len(outfit_response.get('results', []))} outfit(s)"
+          + (f"  message={outfit_response['message']!r}" if "message" in outfit_response else ""))
+
+    outfit_results = outfit_response.get("results", [])
+    if not outfit_results:
+        session["error"] = outfit_response.get(
+            "message", "Could not suggest an outfit for this item."
+        )
+        return session
+
+    # Step 6: Generate the fit card caption for the first suggested outfit
+    outfit = outfit_results[0]
+    session["outfit"] = outfit
+    session["highlighted_item"] = session["selected_item"]
+    session["fit_card"] = create_fit_card(outfit=outfit, new_item=session["selected_item"])
+
+    # Step 7: Return the completed session
     return session
 
 

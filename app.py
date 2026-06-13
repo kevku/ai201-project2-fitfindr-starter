@@ -43,8 +43,62 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
            string and return it along with session["outfit_suggestion"] and
            session["fit_card"].
     """
-    # TODO: implement this function
-    return "Agent not yet implemented.", "", ""
+    # Step 1: Guard against empty query
+    if not user_query or not user_query.strip():
+        return "Please enter a search query.", "", ""
+
+    # Step 2: Select wardrobe
+    wardrobe = (
+        get_empty_wardrobe()
+        if wardrobe_choice == "Empty wardrobe (new user)"
+        else get_example_wardrobe()
+    )
+
+    # Step 3: Run the agent
+    session = run_agent(query=user_query.strip(), wardrobe=wardrobe)
+
+    # Step 4: Surface errors in the first panel, leave the others blank
+    if session["error"]:
+        return session["error"], "", ""
+
+    # Step 5: Format the three output panels
+
+    # --- Listing panel ---
+    item = session["selected_item"]
+    listing_text = "\n".join([
+        item["title"],
+        f"Brand: {item.get('brand', 'Unknown')}",
+        f"Category: {item.get('category', '')}  |  Size: {item.get('size', '')}",
+        f"Condition: {item.get('condition', '')}  |  Price: ${item.get('price', 0):.0f}",
+        f"Platform: {item.get('platform', '')}",
+        f"Colors: {', '.join(item.get('colors', []))}",
+        f"Style: {', '.join(item.get('style_tags', []))}",
+        "",
+        item.get("description", ""),
+    ])
+
+    # --- Outfit panel ---
+    outfit = session["outfit"]
+    pieces = outfit.get("pieces", [])
+    pieces_lines = "\n".join(
+        f"  • {p.get('name', p.get('title', 'Unknown'))}  ({p.get('category', '')})"
+        for p in pieces
+    ) or "  (no wardrobe pieces selected)"
+
+    outfit_text = (
+        f"Outfit #{outfit.get('outfit_id', 1)}\n\n"
+        f"Pieces:\n{pieces_lines}\n\n"
+        f"Stylist notes:\n{outfit.get('notes', '')}"
+    )
+
+    advisory = session["outfit_suggestion"].get("message")
+    if advisory:
+        outfit_text += f"\n\nNote: {advisory}"
+
+    # --- Fit card panel ---
+    fit_card = session["fit_card"] or ""
+
+    return listing_text, outfit_text, fit_card
 
 
 # ── interface ─────────────────────────────────────────────────────────────────
