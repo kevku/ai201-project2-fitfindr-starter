@@ -123,14 +123,16 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     session["parsed"] = {"description": desc, "size": size, "max_price": max_price}
 
     # Step 3: Search listings; stop early if nothing matched
-    search_response = search_listings(description=desc, size=size, max_price=max_price)
-    session["search_results"] = search_response.get("results", [])
+    session["search_results"] = search_listings(description=desc, size=size, max_price=max_price)
 
     if not session["search_results"]:
-        session["error"] = search_response.get(
-            "message",
-            f"No listings found for '{query}'. Try a different description, size, or price range.",
-        )
+        parts = [f"No listings matched '{desc}'."]
+        if size:
+            parts.append(f"Try a different size (searched: {size}).")
+        if max_price is not None:
+            parts.append(f"Try raising your price limit (searched: under ${max_price:.0f}).")
+        parts.append("Or use a simpler description.")
+        session["error"] = " ".join(parts)
         print(f"[DEBUG] no-results path — error: {session['error']!r}")
         print(f"[DEBUG] no-results path — fit_card: {session['fit_card']!r}")
         return session

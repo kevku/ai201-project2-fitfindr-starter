@@ -32,9 +32,9 @@ This tool will look in the listings.json and returns the top 3 matching listings
 
 **What it returns:**
 <!-- Describe the return value — what fields does a result contain? -->
-This tool should return a list of up to 3 dictionaries that contains the closest 
-matching items to the user's description. Each of the dictionaries will be directly 
-taken from `listings.json` where a dictionary will be in the form of:
+Returns a plain list of up to 3 matching item dicts (index 0 is the best match).
+Returns an empty list `[]` if no matches are found — the agent handles messaging
+in `run_agent()`. Each dict is taken directly from `listings.json`:
 {
     "id": string,
     "title": string,
@@ -50,11 +50,10 @@ taken from `listings.json` where a dictionary will be in the form of:
 }
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if no listings match? -->
-If no items pass the description match filter, return:
-{ "results": [], "message": "No listings matched '[description]'. Try a broader description, different size, or higher price range." }
-Do not return loosely related items without telling the user — do not call `suggest_outfit` with empty input.
-
-If results are found, return the top 3 wrapped as: { "results": [...] }
+Returns `[]`. The caller (`run_agent`) checks for an empty list and builds a
+user-facing message that includes what filters were active (size, price limit,
+description) so the user knows what to adjust. Do not call `suggest_outfit`
+with empty input.
 ---
 
 ### Tool 2: suggest_outfit
@@ -113,9 +112,11 @@ Generates a short, shareable caption for a completed outfit — styled like an
 Instagram post. Produces varied output for different inputs where it could relate to the colors, size, or the style of clothings.
 **Input parameters:**
 <!-- List each parameter, its type, and what it represents -->
-- `outfit` (dict): A single outfit object from `suggest_outfit`'s results, 
-  containing the `pieces` and `notes` fields.
-- `new_item` (dict): The original item the outfit was built around, 
+- `outfit` (dict): A single outfit object from `suggest_outfit`'s results,
+  containing the `pieces` and `notes` fields. Must be a non-empty dict — if
+  an empty string or non-dict is passed, returns an error message string
+  without crashing.
+- `new_item` (dict): The original item the outfit was built around,
   passed forward from `search_listings`.
 
 **What it returns:**
@@ -129,10 +130,13 @@ made for my wide-legs 🖤 full look in my stories"
 
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if the outfit data is incomplete? -->
-- If `outfit` is missing required pieces (no top, bottom, or shoes): tell the 
-  user the outfit is incomplete and skip generating a caption.
-- If `new_item` is missing key fields (no price, platform, or description): 
-  generate the caption using whatever fields are available, omitting missing details.
+- If `outfit` is an empty string or non-dict: return a descriptive error
+  message string — do not crash.
+- If `outfit` is missing required pieces (no top, bottom, or shoes): return a
+  descriptive error message string — do not crash.
+- If `new_item` is missing key fields (no price, platform, or description):
+  generate the caption using whatever fields are available, omitting missing
+  details.
 **Dependencies:**
 - Requires a completed outfit from `suggest_outfit`
 - Do not call if `suggest_outfit` returned empty results

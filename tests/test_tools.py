@@ -27,100 +27,96 @@ def outfit(new_item, wardrobe):
 
 def test_search_returns_results():
     r = search_listings("vintage graphic tee", size=None, max_price=50)
-    assert isinstance(r["results"], list)
-    assert len(r["results"]) > 0
+    assert isinstance(r, list)
+    assert len(r) > 0
 
 def test_search_empty_results():
     r = search_listings("designer ballgown", size="XXS", max_price=5)
-    assert r["results"] == []
-    assert "message" in r
+    assert r == []
 
 def test_search_price_filter():
     r = search_listings("jacket", size=None, max_price=10)
-    assert all(item["price"] <= 10 for item in r["results"])
+    assert all(item["price"] <= 10 for item in r)
 
-def test_search_return_is_dict():
+def test_search_return_is_list():
     r = search_listings("vintage tee", "S/M", 50.0)
-    assert isinstance(r, dict)
-    assert "results" in r
+    assert isinstance(r, list)
 
 def test_search_size_none_skips_filter():
     r = search_listings("vintage tee", None, 50.0)
-    assert len(r["results"]) > 0
+    assert len(r) > 0
 
 def test_search_at_most_three_results():
     r = search_listings("top shirt tee blouse", "S/M", 200.0)
-    assert len(r["results"]) <= 3
+    assert len(r) <= 3
 
 def test_search_size_is_hard_filter():
     r = search_listings("vintage top", "M", 200.0)
     # strip parentheticals before checking — "XL (fits oversized)" → "xl"
     def parts(size):
         return {p.split("(")[0].strip().lower() for p in size.split("/")}
-    assert all("m" in parts(item["size"]) for item in r["results"])
+    assert all("m" in parts(item["size"]) for item in r)
 
 def test_search_price_ceiling():
     r = search_listings("vintage shirt", "M", 20.0)
-    assert all(item["price"] <= 20.0 for item in r["results"])
+    assert all(item["price"] <= 20.0 for item in r)
 
 def test_search_category_boost():
     # "shirt" keyword should infer tops — tops should rank first
     r = search_listings("green vintage shirt", "M", 200.0)
-    assert len(r["results"]) > 0
-    assert r["results"][0]["category"] == "tops"
+    assert len(r) > 0
+    assert r[0]["category"] == "tops"
 
 def test_search_color_boost():
     r = search_listings("green shirt", "M", 200.0)
-    colors_in_results = [c.lower() for item in r["results"] for c in item.get("colors", [])]
+    colors_in_results = [c.lower() for item in r for c in item.get("colors", [])]
     assert "green" in colors_in_results
 
 def test_search_style_tag_boost():
     # "vintage" and "preppy" are tags on the Polo Shirt (size M)
     r = search_listings("vintage preppy polo shirt", "M", 200.0)
-    titles = [item["title"] for item in r["results"]]
+    titles = [item["title"] for item in r]
     assert any("Polo" in t for t in titles)
 
 def test_search_required_fields():
     required = {"id", "title", "description", "category", "style_tags",
                 "size", "condition", "price", "colors", "brand", "platform"}
     r = search_listings("boots shoes", "US 8.5", 200.0)
-    for item in r["results"]:
+    for item in r:
         assert required <= item.keys()
 
 def test_search_size_multi_size_listing():
     # Y2K Baby Tee is listed as "S/M" — requesting size "M" should include it
     r = search_listings("tee", "M", 200.0)
-    sizes_returned = [item["size"] for item in r["results"]]
+    sizes_returned = [item["size"] for item in r]
     assert any("M" in size for size in sizes_returned), f"no S/M item in {sizes_returned}"
 
 def test_search_size_strips_parenthetical():
     # "XL (fits oversized)" and "XL (oversized)" should both match size "XL"
     r = search_listings("shirt top", "XL", 200.0)
-    sizes_returned = [item["size"] for item in r["results"]]
+    sizes_returned = [item["size"] for item in r]
     assert any("XL" in s for s in sizes_returned), f"no XL variant in {sizes_returned}"
 
 def test_search_size_full_word_alias():
     # "medium" should match the same listings as "M"
     r_code = search_listings("shirt", "M",      200.0)
     r_word = search_listings("shirt", "medium", 200.0)
-    assert r_code["results"] == r_word["results"]
+    assert r_code == r_word
 
 def test_search_size_case_insensitive():
-    upper = {item["id"] for item in search_listings("shirt", "M",   200.0)["results"]}
-    lower = {item["id"] for item in search_listings("shirt", "m",   200.0)["results"]}
+    upper = {item["id"] for item in search_listings("shirt", "M", 200.0)}
+    lower = {item["id"] for item in search_listings("shirt", "m", 200.0)}
     assert upper == lower
 
-def test_search_no_description_match_returns_message():
-    # "ballgown" and "designer" don't appear in any listing
+def test_search_no_description_match_returns_empty():
+    # "ballgown" and "designer" don't appear in any listing — should return []
     r = search_listings("designer ballgown", size=None, max_price=500)
-    assert r["results"] == []
-    assert "message" in r
-    assert "ballgown" in r["message"] or "designer ballgown" in r["message"]
+    assert r == []
 
 def test_search_description_filter_not_silent():
     # Should not silently return unrelated category matches
     r = search_listings("spacesuit", size=None, max_price=500)
-    assert r["results"] == []
+    assert r == []
 
 
 # ── suggest_outfit ─────────────────────────────────────────────────────────────

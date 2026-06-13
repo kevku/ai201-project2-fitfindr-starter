@@ -111,7 +111,7 @@ def search_listings(
     description: str,
     size: str | None = None,
     max_price: float | None = None,
-) -> dict:
+) -> list:
     """
     Search the mock listings dataset for items matching the description,
     optional size, and optional price ceiling.
@@ -123,8 +123,9 @@ def search_listings(
         max_price:   Upper price limit (inclusive), or None to skip price filtering.
 
     Returns:
-        {"results": [<up to 3 listing dicts>]}  on success
-        {"results": [], "message": "..."}        when nothing matches
+        A list of up to 3 matching listing dicts on success.
+        An empty list [] when nothing matches.
+        Callers should check for an empty list and generate a user-facing message.
     """
     listings = load_listings()
 
@@ -162,16 +163,10 @@ def search_listings(
         candidates.append((score, listing))
 
     if not candidates:
-        return {
-            "results": [],
-            "message": (
-                f"No listings matched '{description}'. "
-                "Item is not found or try a broader description, different size, or higher price range."
-            ),
-        }
+        return []
 
     candidates.sort(key=lambda x: x[0], reverse=True)
-    return {"results": [listing for _, listing in candidates[:3]]}
+    return [listing for _, listing in candidates[:3]]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -223,14 +218,26 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> dict:
         {"results": [], "message": str}     when wardrobe is empty
         {"duplicate": True, "message": str} when new_item already in wardrobe
     """
+    if wardrobe is None:
+        wardrobe = {"items": []}
     items = wardrobe.get("items", [])
 
     if not items:
+        title = new_item.get("title", new_item.get("name", "This item"))
+        category = new_item.get("category", "")
+        _PAIRINGS = {
+            "tops":       "baggy jeans, wide-leg trousers, or cargo pants",
+            "bottoms":    "a graphic tee, an oversized sweater, or a fitted blouse",
+            "outerwear":  "straight-leg jeans and a simple tee, or a monochrome base layer",
+            "shoes":      "jeans and a casual top, or a matching set",
+            "accessories":"a top, bottoms, and shoes — any combination you like",
+        }
+        pairing = _PAIRINGS.get(category, "a variety of pieces")
         return {
             "results": [],
             "message": (
-                "Your wardrobe is empty. Would you like me to search listings "
-                "to build a full outfit?"
+                f"Your wardrobe is empty! {title} pairs well with {pairing}. "
+                "Add some pieces to your wardrobe and I can suggest a complete outfit."
             ),
         }
 
@@ -355,12 +362,20 @@ def create_fit_card(outfit: dict, new_item: dict) -> str:
 
     Args:
         outfit:   A single outfit dict from suggest_outfit() with 'pieces' and 'notes'.
+                  Must be a non-empty dict — if an empty string or non-dict is passed,
+                  returns an error message string without crashing.
         new_item: The listing dict for the thrifted item the outfit is built around.
 
     Returns:
         A casual 2–4 sentence caption string.
-        An error message string if outfit is incomplete — does NOT raise.
+        An error message string if outfit is incomplete or invalid — does NOT raise.
     """
+    if not outfit or not isinstance(outfit, dict):
+        return (
+            "Unable to generate a fit card — the outfit is incomplete or missing "
+            "required pieces. Please complete the outfit first."
+        )
+
     pieces = outfit.get("pieces", [])
 
     # Guard: outfit must cover the three required categories
